@@ -1,0 +1,216 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# API — Release Pipeline
+#
+# Manually triggered.  Mirrors the Azure DevOps pattern:
+#   build → auto-deploy Test → [approval] QA → [approval] Live
+#
+# CI build number (for Test + Docker image):
+#   {MajorMinor}.0-ci.{YYYYMMDD}.{RR}   e.g. 2025.11.0-ci.20260405.07
+#
+# Release version (for QA + Live, counter resets per MajorMinor):
+#   {MajorMinor}.{N}   e.g. 2025.11.3
+#   Counter is derived by counting existing git tags api-v{MajorMinor}.*
+#   This mirrors: $[counter(variables['Version.MajorMinor'], 0)]
+#
+# GitHub secrets required:
+#   DOCKER_HUB_USERNAME   Docker Hub user name
+#   DOCKER_HUB_TOKEN      Docker Hub access token
+#
+# GitHub variables required:
+#   DOCKER_HUB_REPOSITORY  full repo slug  (e.g. myorg/right-to-drive-api)
+#
+# GitHub environments required (configure in repo → Settings → Environments):
+#   test   — no approval gates  (auto-deploy after docker push)
+#   qa     — required reviewers → approval gate
+#   live   — required reviewers → approval gate
+# ═══════════════════════════════════════════════════════════════════════════════
+name: API — Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version-major-minor:
+        description: 'Version Major.Minor  (e.g. 2025.11)'
+        required: false
+        type: string
+        default: '2025.11'
+      node-version:
+        description: 'Node.js version'
+        required: false
+        type: string
+        default: '22'
+
+env:
+  WORKING_DIR: .
+
+# ═══════════════════════════════════════════════════════════════════════════════
+jobs:
+  # ───────────────────────────────────────────────────────────────────────────────
+  # 1. CI build number  {MajorMinor}.0-ci.{YYYYMMDD}.{RR}
+  # ───────────────────────────────────────────────────────────────────────────────
+  generate-build-number:
+    name: Generate CI Build Number
+    runs-on: ubuntu-latest
+    outputs:
+      build-number: ${{ steps.gen.outputs.value }}
+    steps:
+      - name: Compute CI build number
+        id: gen
+        run: |
+          DATE=$(date -u +'%Y%m%d')
+          REV=$(printf '%02d' ${{ github.run_number }})
+          BUILD="${{ inputs.version-major-minor }}.0-ci.${DATE}.${REV}"
+          echo "value=${BUILD}" >> "$GITHUB_OUTPUT"
+          echo "::notice title=CI Build Number::${BUILD}"
+
+  # ───────────────────────────────────────────────────────────────────────────────
+  # 2 – 4.  Quality gates  (NPM build → test & coverage in parallel)
+  # ───────────────────────────────────────────────────────────────────────────────
+  npm-build:
+    name: NPM Build
+    needs: generate-build-number
+    uses: ./.github/workflows/RightToDrive/templates/npm-build.yml
+    with:
+      node-version: ${{ inputs.node-version }}
+      working-directory: .
+
+  npm-test:
+    name: NPM Test
+    needs: npm-build
+    uses: ./.github/workflows/RightToDrive/templates/npm-test.yml
+    with:
+      node-version: ${{ inputs.node-version }}
+      working-directory: .
+
+  npm-coverage:
+    name: NPM Coverage
+    needs: npm-build
+    uses: ./.github/workflows/RightToDrive/templates/npm-coverage.yml
+    with:
+      node-version: ${{ inputs.node-version }}
+      working-directory: .
+      coverage-artifact-name: coverage-release-${{ github.run_number }}
+
+  # ───────────────────────────────────────────────────────────────────────────────
+  # 5. Docker build + push  (tagged with CI build number)
+  # ───────────────────────────────────────────────────────────────────────────────
+  docker-build-push:
+    name: Docker Build & Push
+    needs: [generate-build-number, npm-test, npm-coverage]
+    uses: ./.github/workflows/RightToDrive/templates/docker-build-push.yml
+    with:
+      node-version: ${{ inputs.node-version }}
+      docker-tag: ${{ needs.generate-build-number.outputs.build-number }}
+      docker-repository: ${{ vars.DOCKER_HUB_REPOSITORY }}
+      dockerfile-path: Dockerfile
+      context-path: .
+    secrets:
+      docker-username: ${{ secrets.DOCKER_HUB_USERNAME }}
+      docker-password: ${{ secrets.DOCKER_HUB_TOKEN }}
+
+  # ───────────────────────────────────────────────────────────────────────────────
+  # 6. Auto-deploy to Test  (no approval gate)
+  # ───────────────────────────────────────────────────────────────────────────────
+  deploy-test:
+    name: Deploy → Test (auto)
+    needs: [generate-build-number, docker-build-push]
+    runs-on: ubuntu-latest
+    environment: test
+    steps:
+      - name: Deploy to Test
+        run: |
+          BUILD="${{ needs.generate-build-number.outputs.build-number }}"
+          IMAGE="${{ vars.DOCKER_HUB_REPOSITORY }}:${BUILD}"
+          echo "::notice title=Deploying to Test::${IMAGE}"
+          # ── Replace with your actual deployment commands ──
+          echo "Deployed ${IMAGE} to Test ✓"
+
+  # ───────────────────────────────────────────────────────────────────────────────
+  # 7. Compute release version  {MajorMinor}.{counter}
+  #    Counter increments by counting existing git tags api-v{MajorMinor}.*
+  #    This mirrors Azure DevOps: $[counter(variables['Version.MajorMinor'], 0)]
+  # ───────────────────────────────────────────────────────────────────────────────
+  generate-release-version:
+    name: Generate Release Version
+    needs: deploy-test
+    runs-on: ubuntu-latest
+    outputs:
+      release-version: ${{ steps.rv.outputs.value }}
+    steps:
+      - name: Checkout repository (with tags)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute release version counter
+        id: rv
+        run: |
+          MAJOR_MINOR="${{ inputs.version-major-minor }}"
+          # Count tags matching api-v{MajorMinor}.* (excludes ci build tags)
+          COUNTER=$(git tag --list "api-v${MAJOR_MINOR}.*" 2>/dev/null | wc -l | xargs)
+          RELEASE_VERSION="${MAJOR_MINOR}.$((COUNTER + 1))"
+          echo "value=${RELEASE_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "::notice title=Release Version::${RELEASE_VERSION}"
+
+  # ───────────────────────────────────────────────────────────────────────────────
+  # 8. Deploy to QA  ← APPROVAL GATE
+  #    Configure required reviewers in: repo → Settings → Environments → qa
+  # ───────────────────────────────────────────────────────────────────────────────
+  deploy-qa:
+    name: Deploy → QA  [approval required]
+    needs: [generate-build-number, generate-release-version]
+    runs-on: ubuntu-latest
+    environment: qa
+    steps:
+      - name: Deploy to QA
+        run: |
+          BUILD="${{ needs.generate-build-number.outputs.build-number }}"
+          RELEASE="${{ needs.generate-release-version.outputs.release-version }}"
+          IMAGE="${{ vars.DOCKER_HUB_REPOSITORY }}:${BUILD}"
+          echo "::notice title=Deploying to QA::${IMAGE} as release ${RELEASE}"
+          # ── Replace with your actual deployment commands ──
+          echo "Deployed ${IMAGE} (release ${RELEASE}) to QA ✓"
+
+  # ───────────────────────────────────────────────────────────────────────────────
+  # 9. Deploy to Live  ← APPROVAL GATE  (depends on QA success)
+  #    Configure required reviewers in: repo → Settings → Environments → live
+  #    On success, pushes a release git tag and a versioned Docker Hub tag.
+  # ───────────────────────────────────────────────────────────────────────────────
+  deploy-live:
+    name: Deploy → Live  [approval required]
+    needs: [generate-build-number, generate-release-version, deploy-qa]
+    runs-on: ubuntu-latest
+    environment: live
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Deploy to Live
+        run: |
+          BUILD="${{ needs.generate-build-number.outputs.build-number }}"
+          RELEASE="${{ needs.generate-release-version.outputs.release-version }}"
+          IMAGE="${{ vars.DOCKER_HUB_REPOSITORY }}:${BUILD}"
+          echo "::notice title=Deploying to Live::${IMAGE} as release ${RELEASE}"
+          # ── Replace with your actual deployment commands ──
+          echo "Deployed ${IMAGE} (release ${RELEASE}) to Live ✓"
+
+      - name: Tag Docker image with release version
+        run: |
+          RELEASE="${{ needs.generate-release-version.outputs.release-version }}"
+          docker pull ${{ vars.DOCKER_HUB_REPOSITORY }}:${{ needs.generate-build-number.outputs.build-number }}
+          docker tag \
+            ${{ vars.DOCKER_HUB_REPOSITORY }}:${{ needs.generate-build-number.outputs.build-number }} \
+            ${{ vars.DOCKER_HUB_REPOSITORY }}:${RELEASE}
+          echo "${{ secrets.DOCKER_HUB_TOKEN }}" | \
+            docker login -u "${{ secrets.DOCKER_HUB_USERNAME }}" --password-stdin
+          docker push ${{ vars.DOCKER_HUB_REPOSITORY }}:${RELEASE}
+
+      - name: Create git release tag  api-v{release-version}
+        run: |
+          RELEASE="${{ needs.generate-release-version.outputs.release-version }}"
+          TAG="api-v${RELEASE}"
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "${TAG}" -m "Release ${RELEASE}"
+          git push origin "${TAG}"
+          echo "::notice title=Git Tag Created::${TAG}"

@@ -1,0 +1,72 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Reusable Template — NPM Test Coverage
+#
+# Checks out code, installs dependencies (with cache) and runs the full test
+# suite with coverage instrumentation via `npm run test:cov`.
+# The HTML/LCOV coverage report is uploaded as a workflow artifact for review.
+#
+# Required inputs:
+#   node-version            — Node.js version to use  (e.g. "22")
+#   working-directory       — path to the dir containing package.json
+#
+# Optional inputs:
+#   coverage-artifact-name  — artifact name for the report (default: coverage-report)
+#   retention-days          — how many days to keep the artifact  (default: 7)
+# ─────────────────────────────────────────────────────────────────────────────
+name: Template — NPM Coverage
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: 'Node.js version (e.g. "22")'
+        required: true
+        type: string
+      working-directory:
+        description: 'Relative path to the directory containing package.json'
+        required: false
+        type: string
+        default: '.'
+      coverage-artifact-name:
+        description: 'Artifact name for the uploaded coverage report'
+        required: false
+        type: string
+        default: 'coverage-report'
+      retention-days:
+        description: 'Days to retain the coverage artifact'
+        required: false
+        type: number
+        default: 7
+
+jobs:
+  npm-coverage:
+    name: NPM Coverage (Node ${{ inputs.node-version }})
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js ${{ inputs.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+          cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ${{ inputs.working-directory }}
+        run: npm ci
+
+      - name: Run tests with coverage
+        working-directory: ${{ inputs.working-directory }}
+        run: npm run test:cov
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ${{ inputs.coverage-artifact-name }}
+          path: ${{ inputs.working-directory }}/coverage
+          retention-days: ${{ inputs.retention-days }}
+          if-no-files-found: warn

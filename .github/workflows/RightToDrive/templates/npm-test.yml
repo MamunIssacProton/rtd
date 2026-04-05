@@ -1,0 +1,49 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Reusable Template — NPM Test
+#
+# Checks out code, installs dependencies (with cache) and runs the unit-test
+# suite via `npm test`.  Tests run against source files using ts-jest so no
+# pre-built dist is required.
+#
+# Required inputs:
+#   node-version        — Node.js version to use  (e.g. "22")
+#   working-directory   — path to the dir containing package.json
+# ─────────────────────────────────────────────────────────────────────────────
+name: Template — NPM Test
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: 'Node.js version (e.g. "22")'
+        required: true
+        type: string
+      working-directory:
+        description: 'Relative path to the directory containing package.json'
+        required: false
+        type: string
+        default: '.'
+
+jobs:
+  npm-test:
+    name: NPM Test (Node ${{ inputs.node-version }})
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js ${{ inputs.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+          cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ${{ inputs.working-directory }}
+        run: npm ci
+
+      - name: Run unit tests
+        working-directory: ${{ inputs.working-directory }}
+        run: npm test

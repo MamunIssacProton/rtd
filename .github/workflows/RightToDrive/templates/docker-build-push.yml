@@ -1,0 +1,85 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Reusable Template — Docker Build & Push
+#
+# Builds the multistage Dockerfile (deps → builder → production) and pushes
+# the resulting image to Docker Hub with the supplied tag.
+# Layer caching via GitHub Actions cache (type=gha) keeps builds fast.
+#
+# Required inputs:
+#   node-version      — forwarded as ARG NODE_VERSION to the Dockerfile
+#   docker-tag        — primary tag  (e.g. "2025.11.0-ci.20260405.01")
+#   docker-repository — full Docker Hub repo  (e.g. "myorg/right-to-drive-api")
+#   dockerfile-path   — path to Dockerfile relative to repo root
+#   context-path      — Docker build context path relative to repo root
+#
+# Required secrets:
+#   docker-username   — Docker Hub username
+#   docker-password   — Docker Hub access token / password
+# ─────────────────────────────────────────────────────────────────────────────
+name: Template — Docker Build & Push
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: 'Node.js version passed as ARG NODE_VERSION to the Dockerfile'
+        required: true
+        type: string
+      docker-tag:
+        description: 'Primary image tag (e.g. CI build number)'
+        required: true
+        type: string
+      docker-repository:
+        description: 'Docker Hub repository slug (e.g. myorg/right-to-drive-api)'
+        required: true
+        type: string
+      dockerfile-path:
+        description: 'Path to the Dockerfile relative to the repository root'
+        required: false
+        type: string
+        default: 'Dockerfile'
+      context-path:
+        description: 'Docker build context path relative to the repository root'
+        required: false
+        type: string
+        default: '.'
+    secrets:
+      docker-username:
+        description: 'Docker Hub username'
+        required: true
+      docker-password:
+        description: 'Docker Hub access token or password'
+        required: true
+
+jobs:
+  docker-build-push:
+    name: Docker Build & Push (${{ inputs.docker-tag }})
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.docker-username }}
+          password: ${{ secrets.docker-password }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ inputs.context-path }}
+          file: ${{ inputs.dockerfile-path }}
+          push: true
+          tags: |
+            ${{ inputs.docker-repository }}:${{ inputs.docker-tag }}
+            ${{ inputs.docker-repository }}:latest
+          build-args: |
+            NODE_VERSION=${{ inputs.node-version }}
+          # GitHub Actions layer cache — avoids re-downloading base images
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

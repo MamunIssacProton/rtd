@@ -1,0 +1,129 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# API — Dev Pipeline
+#
+# Manually triggered.  Runs the full quality chain, pushes the Docker image
+# to Docker Hub and automatically deploys to the Test environment.
+#
+# Build number format (mirrors Azure DevOps convention):
+#   $(Version.MajorMinor).0-ci.$(Date:yyyyMMdd).$(Rev:rr)
+#   e.g.  2025.11.0-ci.20260405.07
+#
+# GitHub secrets required:
+#   DOCKER_HUB_USERNAME   Docker Hub user name
+#   DOCKER_HUB_TOKEN      Docker Hub access token
+#
+# GitHub variables required:
+#   DOCKER_HUB_REPOSITORY  full repo slug  (e.g. myorg/right-to-drive-api)
+#
+# GitHub environments required (configure in repo → Settings → Environments):
+#   test   — no approval gates (auto-deploy)
+# ═══════════════════════════════════════════════════════════════════════════════
+name: API — Dev
+
+on:
+  workflow_dispatch:
+    inputs:
+      version-major-minor:
+        description: 'Version Major.Minor  (e.g. 2026.04)'
+        required: false
+        type: string
+        default: '2026.04'
+      node-version:
+        description: 'Node.js version'
+        required: false
+        type: string
+        default: '24.13.0'
+
+# ─── Shared values ─────────────────────────────────────────────────────────────
+env:
+  WORKING_DIR: .
+  DOCKERFILE: Dockerfile
+
+# ═══════════════════════════════════════════════════════════════════════════════
+jobs:
+  # ───────────────────────────────────────────────────────────────────────────────
+  # 1. Generate the CI build number
+  #    Format: {MajorMinor}.0-ci.{YYYYMMDD}.{RR}
+  # ───────────────────────────────────────────────────────────────────────────────
+  generate-build-number:
+    name: Generate Build Number
+    runs-on: ubuntu-latest
+    outputs:
+      build-number: ${{ steps.gen.outputs.value }}
+    steps:
+      - name: Compute build number
+        id: gen
+        run: |
+          DATE=$(date -u +'%Y%m%d')
+          REV=$(printf '%02d' ${{ github.run_number }})
+          BUILD="${{ inputs.version-major-minor }}.0-ci.${DATE}.${REV}"
+          echo "value=${BUILD}" >> "$GITHUB_OUTPUT"
+          echo "::notice title=Build Number::${BUILD}"
+
+  # ───────────────────────────────────────────────────────────────────────────────
+  # 2. Compile TypeScript
+  # ───────────────────────────────────────────────────────────────────────────────
+  npm-build:
+    name: NPM Build
+    needs: generate-build-number
+    uses: ./.github/workflows/RightToDrive/templates/npm-build.yml
+    with:
+      node-version: ${{ inputs.node-version }}
+      working-directory: .
+
+  # ───────────────────────────────────────────────────────────────────────────────
+  # 3. Unit tests  ┐
+  # 4. Coverage    ┘  run in parallel after the build succeeds
+  # ───────────────────────────────────────────────────────────────────────────────
+  npm-test:
+    name: NPM Test
+    needs: npm-build
+    uses: ./.github/workflows/RightToDrive/templates/npm-test.yml
+    with:
+      node-version: ${{ inputs.node-version }}
+      working-directory: .
+
+  npm-coverage:
+    name: NPM Coverage
+    needs: npm-build
+    uses: ./.github/workflows/RightToDrive/templates/npm-coverage.yml
+    with:
+      node-version: ${{ inputs.node-version }}
+      working-directory: .
+      coverage-artifact-name: coverage-dev-${{ github.run_number }}
+
+  # ───────────────────────────────────────────────────────────────────────────────
+  # 5. Docker build + push  (only if both test gates pass)
+  # ───────────────────────────────────────────────────────────────────────────────
+  docker-build-push:
+    name: Docker Build & Push
+    needs: [generate-build-number, npm-test, npm-coverage]
+    uses: ./.github/workflows/RightToDrive/templates/docker-build-push.yml
+    with:
+      node-version: ${{ inputs.node-version }}
+      docker-tag: ${{ needs.generate-build-number.outputs.build-number }}
+      docker-repository: ${{ vars.DOCKER_HUB_REPOSITORY }}
+      dockerfile-path: Dockerfile
+      context-path: .
+    secrets:
+      docker-username: ${{ secrets.DOCKER_HUB_USERNAME }}
+      docker-password: ${{ secrets.DOCKER_HUB_TOKEN }}
+
+  # ───────────────────────────────────────────────────────────────────────────────
+  # 6. Auto-deploy to Test  (no approval gate)
+  # ───────────────────────────────────────────────────────────────────────────────
+  deploy-test:
+    name: Deploy → Test (auto)
+    needs: [generate-build-number, docker-build-push]
+    runs-on: ubuntu-latest
+    environment: test
+    steps:
+      - name: Deploy to Test environment
+        run: |
+          BUILD="${{ needs.generate-build-number.outputs.build-number }}"
+          IMAGE="${{ vars.DOCKER_HUB_REPOSITORY }}:${BUILD}"
+          echo "::notice title=Deploying to Test::${IMAGE}"
+          # ── Replace the lines below with your actual deployment commands ──
+          # e.g. kubectl set image deployment/api api=${IMAGE}
+          #      helm upgrade api ./chart --set image.tag=${BUILD}
+          echo "Deployed ${IMAGE} to Test ✓"
