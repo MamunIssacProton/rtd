@@ -22,20 +22,11 @@ name: API — Dev
 
 on:
   workflow_dispatch:
-    inputs:
-      version-major-minor:
-        description: 'Version Major.Minor  (e.g. 2026.04)'
-        required: false
-        type: string
-        default: '2026.04'
-      node-version:
-        description: 'Node.js version'
-        required: false
-        type: string
-        default: '24.13.0'
 
-# ─── Shared values ─────────────────────────────────────────────────────────────
+# ─── Shared values (edit here to change version or Node) ───────────────────────
 env:
+  VERSION_MAJOR_MINOR: '2026.04'
+  NODE_VERSION: '22'
   WORKING_DIR: .
   DOCKERFILE: Dockerfile
 
@@ -56,7 +47,7 @@ jobs:
         run: |
           DATE=$(date -u +'%Y%m%d')
           REV=$(printf '%02d' ${{ github.run_number }})
-          BUILD="${{ inputs.version-major-minor }}.0-ci.${DATE}.${REV}"
+          BUILD="${{ env.VERSION_MAJOR_MINOR }}.0-ci.${DATE}.${REV}"
           echo "value=${BUILD}" >> "$GITHUB_OUTPUT"
           echo "::notice title=Build Number::${BUILD}"
 
@@ -66,9 +57,9 @@ jobs:
   npm-build:
     name: NPM Build
     needs: generate-build-number
-    uses: ./.github/workflows/RightToDrive/templates/npm-build.yml
+    uses: ./.github/workflows/templates/npm-build.yml
     with:
-      node-version: ${{ inputs.node-version }}
+      node-version: ${{ env.NODE_VERSION }}
       working-directory: .
 
   # ───────────────────────────────────────────────────────────────────────────────
@@ -78,17 +69,17 @@ jobs:
   npm-test:
     name: NPM Test
     needs: npm-build
-    uses: ./.github/workflows/RightToDrive/templates/npm-test.yml
+    uses: ./.github/workflows/templates/npm-test.yml
     with:
-      node-version: ${{ inputs.node-version }}
+      node-version: ${{ env.NODE_VERSION }}
       working-directory: .
 
   npm-coverage:
     name: NPM Coverage
     needs: npm-build
-    uses: ./.github/workflows/RightToDrive/templates/npm-coverage.yml
+    uses: ./.github/workflows/templates/npm-coverage.yml
     with:
-      node-version: ${{ inputs.node-version }}
+      node-version: ${{ env.NODE_VERSION }}
       working-directory: .
       coverage-artifact-name: coverage-dev-${{ github.run_number }}
 
@@ -98,9 +89,9 @@ jobs:
   docker-build-push:
     name: Docker Build & Push
     needs: [generate-build-number, npm-test, npm-coverage]
-    uses: ./.github/workflows/RightToDrive/templates/docker-build-push.yml
+    uses: ./.github/workflows/templates/docker-build-push.yml
     with:
-      node-version: ${{ inputs.node-version }}
+      node-version: ${{ env.NODE_VERSION }}
       docker-tag: ${{ needs.generate-build-number.outputs.build-number }}
       docker-repository: ${{ vars.DOCKER_HUB_REPOSITORY }}
       dockerfile-path: Dockerfile
