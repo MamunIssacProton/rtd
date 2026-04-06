@@ -63,7 +63,7 @@ jobs:
       - name: Install GitVersion
         uses: gittools/actions/gitversion/setup@v3
         with:
-          versionSpec: '6.x'
+          versionSpec: '5.x'
 
       # Override tag-prefix at runtime so dev (dev-v*) and release (v*) tags
       # are counted independently — they never share the same Patch counter.
