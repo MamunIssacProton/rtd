@@ -111,7 +111,6 @@ jobs:
 
   # ─────────────────────────────────────────────────────────────────────────────
   # 7. Deploy to QA  ← APPROVAL GATE
-  #    Git tag rc-v{version} is pushed AFTER successful QA deployment.
   #    Add required reviewers: repo → Settings → Environments → qa
   # ─────────────────────────────────────────────────────────────────────────────
   deploy-qa:
@@ -119,8 +118,6 @@ jobs:
     needs: [generate-qa-version, docker-build-push]
     runs-on: ubuntu-latest
     environment: qa
-    permissions:
-      contents: write
     steps:
       - name: Deploy to QA
         run: |
@@ -130,6 +127,16 @@ jobs:
           # ── Replace with your actual deployment commands ──
           echo "Deployed ${IMAGE} to QA ✓"
 
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 8. Tag QA — only runs after deploy-qa succeeds
+  # ─────────────────────────────────────────────────────────────────────────────
+  tag-qa:
+    name: Tag QA Build (rc-v)
+    needs: [generate-qa-version, deploy-qa]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
@@ -145,45 +152,28 @@ jobs:
           echo "::notice title=QA Git Tag::${VERSION}"
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # 8. Generate Live-scoped version — only runs after QA deploy succeeds
+  # 9. Generate Live-scoped version — only runs after QA tag is pushed
   #    Counts existing v{YYYY.MM}.* tags — isolated from QA (rc-v*) tags
   # ─────────────────────────────────────────────────────────────────────────────
   generate-live-version:
     name: Generate Live Version (v)
-    needs: deploy-qa
+    needs: tag-qa
     uses: ./.github/workflows/tmpl-versioning.yml
     with:
       tag-prefix: 'v'
       include-ci-suffix: false
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # 9. Deploy to Live  ← APPROVAL GATE  (depends on QA success)
-  #    Re-tags the Docker image from rc-v to the clean Live version.
-  #    Git tag v{version} is pushed AFTER successful Live deployment.
-  #    Add required reviewers: repo → Settings → Environments → live
+  # 10. Deploy to Live  ← APPROVAL GATE
+  #     Re-tags the Docker image from rc-v to the clean Live version.
+  #     Add required reviewers: repo → Settings → Environments → live
   # ─────────────────────────────────────────────────────────────────────────────
   deploy-live:
     name: Deploy → Live [approval required]
-    needs: [generate-qa-version, generate-live-version, deploy-qa]
+    needs: [generate-qa-version, generate-live-version]
     runs-on: ubuntu-latest
     environment: live
-    permissions:
-      contents: write
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Create and push Live git tag (v)
-        run: |
-          LIVE_VERSION="${{ needs.generate-live-version.outputs.version }}"
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag "${LIVE_VERSION}" -m "Live ${LIVE_VERSION}"
-          git push origin "${LIVE_VERSION}"
-          echo "::notice title=Live Git Tag::${LIVE_VERSION}"
-
       - name: Re-tag Docker image with Live version
         run: |
           QA_VERSION="${{ needs.generate-qa-version.outputs.version }}"
@@ -204,3 +194,27 @@ jobs:
           echo "::notice title=Deploying to Live::${IMAGE}"
           # ── Replace with your actual deployment commands ──
           echo "Deployed ${IMAGE} to Live ✓"
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 11. Tag Live — only runs after deploy-live succeeds
+  # ─────────────────────────────────────────────────────────────────────────────
+  tag-live:
+    name: Tag Live Release (v)
+    needs: [generate-live-version, deploy-live]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create and push Live git tag (v)
+        run: |
+          LIVE_VERSION="${{ needs.generate-live-version.outputs.version }}"
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "${LIVE_VERSION}" -m "Live ${LIVE_VERSION}"
+          git push origin "${LIVE_VERSION}"
+          echo "::notice title=Live Git Tag::${LIVE_VERSION}"
