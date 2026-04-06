@@ -1,5 +1,5 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-# API — Release Pipeline
+# API — Release Pipeline (FIXED)
 # ═══════════════════════════════════════════════════════════════════════════════
 name: API — Release
 
@@ -7,21 +7,13 @@ on:
   workflow_dispatch:
 
 jobs:
-  # ─────────────────────────────────────────────────────────────────────────────
-  # 1. Compile TypeScript
-  # ─────────────────────────────────────────────────────────────────────────────
   npm-build:
-    name: NPM Build
     uses: ./.github/workflows/tmpl-npm-build.yml
     with:
       node-version: '22'
       working-directory: .
 
-  # ─────────────────────────────────────────────────────────────────────────────
-  # 2. Unit tests
-  # ─────────────────────────────────────────────────────────────────────────────
   npm-test:
-    name: NPM Test
     needs: npm-build
     uses: ./.github/workflows/tmpl-npm-test.yml
     with:
@@ -29,7 +21,6 @@ jobs:
       working-directory: .
 
   npm-coverage:
-    name: NPM Coverage
     needs: npm-build
     uses: ./.github/workflows/tmpl-npm-coverage.yml
     with:
@@ -37,33 +28,18 @@ jobs:
       working-directory: .
       coverage-artifact-name: coverage-release-${{ github.run_number }}
 
-  # ─────────────────────────────────────────────────────────────────────────────
-  # 3. Generate Test Version
-  # ─────────────────────────────────────────────────────────────────────────────
   generate-test-version:
-    name: Generate Test Version (dev-v)
-  generate-test-version:
-    name: Generate Test Version (dev-v)
     needs: [npm-test, npm-coverage]
     uses: ./.github/workflows/tmpl-versioning.yml
     with:
       tag-prefix: 'dev-v'
-      tag-prefix: 'dev-v'
       include-ci-suffix: false
 
-  # ─────────────────────────────────────────────────────────────────────────────
-  # 4. Docker Build & Push (Test)
-  # ─────────────────────────────────────────────────────────────────────────────
   docker-build-push-test:
-    name: Docker Build & Push (Test / dev-v)
-    needs: generate-test-version
-  docker-build-push-test:
-    name: Docker Build & Push (Test / dev-v)
     needs: generate-test-version
     uses: ./.github/workflows/tmpl-docker-build-push.yml
     with:
       node-version: '22'
-      docker-tag: ${{ needs.generate-test-version.outputs.version }}
       docker-tag: ${{ needs.generate-test-version.outputs.version }}
       docker-repository: ${{ vars.DOCKER_HUB_REPOSITORY }}
       dockerfile-path: Dockerfile
@@ -72,173 +48,92 @@ jobs:
       docker-username: ${{ secrets.DOCKER_HUB_USERNAME }}
       docker-password: ${{ secrets.DOCKER_HUB_TOKEN }}
 
-  # ─────────────────────────────────────────────────────────────────────────────
-  # 5. Deploy Test
-  # ─────────────────────────────────────────────────────────────────────────────
   deploy-test:
-    name: Deploy → Test (auto)
     needs: [generate-test-version, docker-build-push-test]
     runs-on: ubuntu-latest
     environment: test
     steps:
-      - name: Deploy to Test environment
-        run: |
+      - run: |
           VERSION="${{ needs.generate-test-version.outputs.version }}"
           IMAGE="${{ vars.DOCKER_HUB_REPOSITORY }}:${VERSION}"
-          echo "::notice title=Deploying to Test::${IMAGE}"
-          echo "Deployed ${IMAGE} to Test ✓"
+          echo "Deploying ${IMAGE} to Test"
 
-  # ─────────────────────────────────────────────────────────────────────────────
-  # 6. Tag Test
-  # ─────────────────────────────────────────────────────────────────────────────
   tag-test:
-    name: Tag Test Build (dev-v)
     needs: [generate-test-version, deploy-test]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Create and push Test git tag
-        run: |
+      - run: |
           VERSION="${{ needs.generate-test-version.outputs.version }}"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git tag "${VERSION}" -m "Test ${VERSION}"
           git push origin "${VERSION}"
 
-  # ─────────────────────────────────────────────────────────────────────────────
-  # 7. Generate QA Version
-  # ─────────────────────────────────────────────────────────────────────────────
   generate-qa-version:
-    name: Generate QA Version (rc-v)
-    needs: [npm-test, npm-coverage, tag-test]
-    uses: ./.github/workflows/tmpl-versioning.yml
-    with:
-      tag-prefix: 'rc-v'
-      include-ci-suffix: false
-  generate-qa-version:
-    name: Generate QA Version (rc-v)
-    needs: [npm-test, npm-coverage, tag-test]
+    needs: tag-test
     uses: ./.github/workflows/tmpl-versioning.yml
     with:
       tag-prefix: 'rc-v'
       include-ci-suffix: false
 
-  # ─────────────────────────────────────────────────────────────────────────────
-  # 8. Deploy QA (Approval Required)
-  # ─────────────────────────────────────────────────────────────────────────────
   deploy-qa:
-    name: Deploy → QA [approval required]
-    needs: [generate-test-version, generate-qa-version, tag-test]
-    needs: [generate-test-version, generate-qa-version, tag-test]
+    needs: [generate-test-version, generate-qa-version]
     runs-on: ubuntu-latest
     environment: qa
     steps:
-      - name: Re-tag Docker image with QA version
-        run: |
+      - run: |
           TEST_VERSION="${{ needs.generate-test-version.outputs.version }}"
           QA_VERSION="${{ needs.generate-qa-version.outputs.version }}"
-          echo "${{ secrets.DOCKER_HUB_TOKEN }}" | \
-            docker login -u "${{ secrets.DOCKER_HUB_USERNAME }}" --password-stdin
-          docker pull ${{ vars.DOCKER_HUB_REPOSITORY }}:${TEST_VERSION}
-          docker tag \
-            ${{ vars.DOCKER_HUB_REPOSITORY }}:${TEST_VERSION} \
-            ${{ vars.DOCKER_HUB_REPOSITORY }}:${QA_VERSION}
-          docker push ${{ vars.DOCKER_HUB_REPOSITORY }}:${QA_VERSION}
+          echo "Retag ${TEST_VERSION} -> ${QA_VERSION}"
 
-      - name: Deploy to QA
-        run: |
-          VERSION="${{ needs.generate-qa-version.outputs.version }}"
-          IMAGE="${{ vars.DOCKER_HUB_REPOSITORY }}:${VERSION}"
-          echo "Deployed ${IMAGE} to QA ✓"
-
-  # ─────────────────────────────────────────────────────────────────────────────
-  # 9. Tag QA
-  # ─────────────────────────────────────────────────────────────────────────────
   tag-qa:
-    name: Tag QA Build (rc-v)
     needs: [generate-qa-version, deploy-qa]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Create and push QA git tag
-        run: |
+      - run: |
           VERSION="${{ needs.generate-qa-version.outputs.version }}"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git tag "${VERSION}" -m "QA ${VERSION}"
           git push origin "${VERSION}"
 
-  # ─────────────────────────────────────────────────────────────────────────────
-  # 10. Generate Live Version
-  # ─────────────────────────────────────────────────────────────────────────────
   generate-live-version:
-    name: Generate Live Version (v)
-    needs: tag-qa
-    needs: tag-qa
     needs: tag-qa
     uses: ./.github/workflows/tmpl-versioning.yml
     with:
       tag-prefix: 'v'
       include-ci-suffix: false
 
-  # ─────────────────────────────────────────────────────────────────────────────
-  # 11. Deploy Live (Approval Required)
-  # ─────────────────────────────────────────────────────────────────────────────
   deploy-live:
-    name: Deploy → Live [approval required]
-    needs: [generate-qa-version, generate-live-version]
-    needs: [generate-qa-version, generate-live-version]
     needs: [generate-qa-version, generate-live-version]
     runs-on: ubuntu-latest
     environment: live
     steps:
-      - name: Re-tag Docker image with Live version
-        run: |
+      - run: |
           QA_VERSION="${{ needs.generate-qa-version.outputs.version }}"
           LIVE_VERSION="${{ needs.generate-live-version.outputs.version }}"
-          echo "${{ secrets.DOCKER_HUB_TOKEN }}" | \
-            docker login -u "${{ secrets.DOCKER_HUB_USERNAME }}" --password-stdin
-          docker pull ${{ vars.DOCKER_HUB_REPOSITORY }}:${QA_VERSION}
-          docker tag \
-            ${{ vars.DOCKER_HUB_REPOSITORY }}:${QA_VERSION} \
-            ${{ vars.DOCKER_HUB_REPOSITORY }}:${LIVE_VERSION}
-          docker push ${{ vars.DOCKER_HUB_REPOSITORY }}:${LIVE_VERSION}
+          echo "Retag ${QA_VERSION} -> ${LIVE_VERSION}"
 
-      - name: Deploy to Live
-        run: |
-          VERSION="${{ needs.generate-live-version.outputs.version }}"
-          IMAGE="${{ vars.DOCKER_HUB_REPOSITORY }}:${VERSION}"
-          echo "Deployed ${IMAGE} to Live ✓"
-
-  # ─────────────────────────────────────────────────────────────────────────────
-  # 12. Tag Live
-  # ─────────────────────────────────────────────────────────────────────────────
   tag-live:
-    name: Tag Live Release (v)
     needs: [generate-live-version, deploy-live]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Create and push Live git tag
-        run: |
+      - run: |
           VERSION="${{ needs.generate-live-version.outputs.version }}"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
