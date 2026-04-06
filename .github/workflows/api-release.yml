@@ -170,7 +170,7 @@ jobs:
     permissions:
       contents: write
     steps:
-     - name: Checkout repository
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -183,7 +183,7 @@ jobs:
           git tag "${LIVE_VERSION}" -m "Live ${LIVE_VERSION}"
           git push origin "${LIVE_VERSION}"
           echo "::notice title=Live Git Tag::${LIVE_VERSION}"
-          
+
       - name: Re-tag Docker image with Live version
         run: |
           QA_VERSION="${{ needs.generate-qa-version.outputs.version }}"
