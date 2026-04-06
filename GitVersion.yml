@@ -1,5 +1,5 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# GitVersion configuration
+# GitVersion 5.x configuration
 # https://gitversion.net/docs/reference/configuration
 #
 # Mode: Mainline
@@ -7,15 +7,14 @@
 #   The Patch counter increments per commit since the last matching git tag.
 #
 # Branch strategy
-#   dev          → pre-release label "ci"   (dev-v2026.04.N-ci.DATE.RUN)
-#   main         → no pre-release label     (v2026.04.N)
-#   release/**   → no pre-release label     (v2026.04.N)
+#   dev          → pre-release tag "ci"   (used to form dev-v2026.04.N-ci.DATE.RUN)
+#   main         → no pre-release tag     (used to form v2026.04.N)
+#   release/**   → no pre-release tag     (used to form v2026.04.N)
 #
-# The tag-prefix is overridden per-pipeline call via /overrideconfig so that
-# dev tags (dev-v*) and release tags (v*) never share the same counter.
+# The tag-prefix is overridden per-pipeline via overrideConfig so that
+# dev tags (dev-v*) and release tags (v*) maintain isolated Patch counters.
 # ─────────────────────────────────────────────────────────────────────────────
 
-assembly-versioning-scheme: MajorMinorPatch
 mode: Mainline
 next-version: 0.1.0
 
@@ -23,25 +22,23 @@ major-version-bump-message: '\+semver:\s?(breaking|major)'
 minor-version-bump-message: '\+semver:\s?(feature|minor)'
 patch-version-bump-message: '\+semver:\s?(fix|patch)'
 no-bump-message: '\+semver:\s?(none|skip)'
-commit-message-incrementing: Enabled
 
 branches:
   dev:
-    label: ci
-    increment: Patch
     regex: ^dev$
-    track-merge-target: false
+    tag: ci
+    increment: Patch
+    prevent-increment-of-merged-branch-version: false
+    is-release-branch: false
 
   main:
-    label: ''
-    increment: Patch
     regex: ^(main|master)$
+    tag: ''
+    increment: Patch
     is-release-branch: true
-    track-merge-target: false
 
   release:
-    label: ''
-    increment: Patch
     regex: ^release/.*$
+    tag: ''
+    increment: Patch
     is-release-branch: true
-    track-merge-target: false
