@@ -79,7 +79,7 @@ jobs:
   npm-build:
     name: NPM Build
     needs: [config, generate-build-number]
-    uses: ./.github/workflows/templates/npm-build.yml
+    uses: ./.github/workflows/tmpl-npm-build.yml
     with:
       node-version: ${{ needs.config.outputs.node-version }}
       working-directory: .
@@ -87,7 +87,7 @@ jobs:
   npm-test:
     name: NPM Test
     needs: [config, npm-build]
-    uses: ./.github/workflows/templates/npm-test.yml
+    uses: ./.github/workflows/tmpl-npm-test.yml
     with:
       node-version: ${{ needs.config.outputs.node-version }}
       working-directory: .
@@ -95,7 +95,7 @@ jobs:
   npm-coverage:
     name: NPM Coverage
     needs: [config, npm-build]
-    uses: ./.github/workflows/templates/npm-coverage.yml
+    uses: ./.github/workflows/tmpl-npm-coverage.yml
     with:
       node-version: ${{ needs.config.outputs.node-version }}
       working-directory: .
@@ -107,7 +107,7 @@ jobs:
   docker-build-push:
     name: Docker Build & Push
     needs: [config, generate-build-number, npm-test, npm-coverage]
-    uses: ./.github/workflows/templates/docker-build-push.yml
+    uses: ./.github/workflows/tmpl-docker-build-push.yml
     with:
       node-version: ${{ needs.config.outputs.node-version }}
       docker-tag: ${{ needs.generate-build-number.outputs.build-number }}
