@@ -1,7 +1,7 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 # API — Release Pipeline
 #
-# Triggered automatically when dev is merged into main or a release/* branch.
+# Triggered manually via Actions → Run workflow.
 # Versioning is branch-scoped — tags use the "v" prefix and are completely
 # independent from dev tags.
 #
@@ -28,10 +28,7 @@
 name: API — Release
 
 on:
-  push:
-    branches:
-      - main
-      - 'release/**'
+  workflow_dispatch:
 
 # ═══════════════════════════════════════════════════════════════════════════════
 jobs:
