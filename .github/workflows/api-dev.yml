@@ -91,17 +91,13 @@ jobs:
       docker-password: ${{ secrets.DOCKER_HUB_TOKEN }}
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # 6. Deploy to Test (auto) + write git tag on success
-  #    Tag is written AFTER successful deployment so a failed build never
-  #    consumes a version number.
+  # 6. Deploy to Test (auto)
   # ─────────────────────────────────────────────────────────────────────────────
   deploy-test:
     name: Deploy → Test (auto)
     needs: [generate-version, docker-build-push]
     runs-on: ubuntu-latest
     environment: test
-    permissions:
-      contents: write # required to push the git tag
     steps:
       - name: Deploy to Test environment
         run: |
@@ -109,15 +105,24 @@ jobs:
           IMAGE="${{ vars.DOCKER_HUB_REPOSITORY }}:${VERSION}"
           echo "::notice title=Deploying to Test::${IMAGE}"
           # ── Replace with your actual deployment commands ──
-          # e.g. kubectl set image deployment/api api=${IMAGE}
           echo "Deployed ${IMAGE} to Test ✓"
 
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 7. Tag — only runs after deploy-test succeeds
+  # ─────────────────────────────────────────────────────────────────────────────
+  tag-dev:
+    name: Tag Dev Build
+    needs: [generate-version, deploy-test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Create and push git tag
+      - name: Create and push dev git tag
         run: |
           VERSION="${{ needs.generate-version.outputs.version }}"
           git config user.name  "github-actions[bot]"
