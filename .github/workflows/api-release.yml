@@ -207,6 +207,7 @@ jobs:
   generate-live-version:
     name: Generate Live Version (v)
     needs: tag-qa
+    needs: tag-qa
     uses: ./.github/workflows/tmpl-versioning.yml
     with:
       tag-prefix: 'v'
@@ -219,6 +220,7 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   deploy-live:
     name: Deploy → Live [approval required]
+    needs: [generate-qa-version, generate-live-version]
     needs: [generate-qa-version, generate-live-version]
     runs-on: ubuntu-latest
     environment: live
