@@ -1,0 +1,88 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Reusable Template — GitVersion-based Branch-Scoped Versioning
+#
+# Uses GitVersion (gittools/actions v1.1.1, GitVersion 5.x) to compute the
+# semantic patch counter from git history, then formats the version string
+# according to the project convention:
+#
+# Dev  (tag-prefix: dev-v, include-ci-suffix: true)
+#   output : dev-v2026.04.3-ci.20260406.07
+#
+# Release  (tag-prefix: v, include-ci-suffix: false)
+#   output : v2026.04.1
+#
+# Requires GitVersion.yml at the repository root.
+#
+# Inputs:
+#   tag-prefix        — git tag prefix  e.g. "dev-v"  or  "v"
+#   include-ci-suffix — append -ci.{YYYYMMDD}.{run}  (default: false)
+#
+# Outputs:
+#   version           — full version string  (used as Docker tag + git tag)
+#   year-month        — YYYY.MM derived from current UTC date
+# ─────────────────────────────────────────────────────────────────────────────
+name: Template — Versioning
+
+on:
+  workflow_call:
+    inputs:
+      tag-prefix:
+        description: 'Git tag prefix  e.g. "dev-v" or "v"'
+        required: true
+        type: string
+      include-ci-suffix:
+        description: 'Append -ci.{YYYYMMDD}.{run} suffix (for dev builds)'
+        required: false
+        type: boolean
+        default: false
+    outputs:
+      version:
+        description: 'Full version string  e.g. dev-v2026.04.3-ci.20260406.07'
+        value: ${{ jobs.generate-version.outputs.version }}
+      year-month:
+        description: 'YYYY.MM of the current UTC month'
+        value: ${{ jobs.generate-version.outputs.year-month }}
+
+jobs:
+  generate-version:
+    name: Generate Version (${{ inputs.tag-prefix }})
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      year-month: ${{ steps.ver.outputs.year-month }}
+
+    steps:
+      - name: Checkout repository with full tag history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install GitVersion
+        uses: gittools/actions/gitversion/setup@v1.1.1
+        with:
+          versionSpec: '5.x'
+
+      - name: Execute GitVersion
+        id: gitversion
+        uses: gittools/actions/gitversion/execute@v1.1.1
+        with:
+          useConfigFile: true
+
+      - name: Compose version string
+        id: ver
+        run: |
+          YEAR_MONTH=$(date -u +'%Y.%m')
+          PATCH="${{ steps.gitversion.outputs.Patch }}"
+          PREFIX="${{ inputs.tag-prefix }}"
+
+          if [ "${{ inputs.include-ci-suffix }}" = "true" ]; then
+            DATE=$(date -u +'%Y%m%d')
+            RUN=$(printf '%02d' ${{ github.run_number }})
+            VERSION="${PREFIX}${YEAR_MONTH}.${PATCH}-ci.${DATE}.${RUN}"
+          else
+            VERSION="${PREFIX}${YEAR_MONTH}.${PATCH}"
+          fi
+
+          echo "version=${VERSION}"       >> "$GITHUB_OUTPUT"
+          echo "year-month=${YEAR_MONTH}" >> "$GITHUB_OUTPUT"
+          echo "::notice title=Version::${VERSION}"
