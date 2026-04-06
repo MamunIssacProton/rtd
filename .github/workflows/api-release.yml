@@ -11,7 +11,8 @@
 # Counter N resets every calendar month and only counts "v" tags (no dev-v),
 # so frequent dev builds never pollute the release version counter.
 #
-# Flow:  build → [approval] QA + rc-v tag → [approval] Live + v tag
+# Flow:  build → Test (dev-v image + git tag) → [approval] QA (re-tag dev-v→rc-v, deploy) + rc-v git tag
+#        → [approval] Live (re-tag rc-v→v, deploy) + v git tag
 #
 # GitHub secrets required:
 #   DOCKER_HUB_USERNAME   Docker Hub username
@@ -64,27 +65,26 @@ jobs:
       coverage-artifact-name: coverage-release-${{ github.run_number }}
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # 4. Generate QA-scoped version — only runs if build AND tests passed
-  #    Counts existing rc-v{YYYY.MM}.* tags — isolated from Live (v*) tags
+  # 4. Test track (dev-v) — version, image, deploy — runs before QA
   # ─────────────────────────────────────────────────────────────────────────────
-  generate-qa-version:
-    name: Generate QA Version (rc-v)
+  generate-test-version:
+    name: Generate Test Version (dev-v)
     needs: [npm-test, npm-coverage]
     uses: ./.github/workflows/tmpl-versioning.yml
     with:
-      tag-prefix: 'rc-v'
+      tag-prefix: 'dev-v'
       include-ci-suffix: false
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # 5. Docker build + push  (tagged with the QA release candidate version)
+  # 4a. Docker build + push — Test image (dev-v tag from generate-test-version)
   # ─────────────────────────────────────────────────────────────────────────────
-  docker-build-push:
-    name: Docker Build & Push
-    needs: generate-qa-version
+  docker-build-push-test:
+    name: Docker Build & Push (Test / dev-v)
+    needs: generate-test-version
     uses: ./.github/workflows/tmpl-docker-build-push.yml
     with:
       node-version: '22'
-      docker-tag: ${{ needs.generate-qa-version.outputs.version }}
+      docker-tag: ${{ needs.generate-test-version.outputs.version }}
       docker-repository: ${{ vars.DOCKER_HUB_REPOSITORY }}
       dockerfile-path: Dockerfile
       context-path: .
@@ -93,32 +93,81 @@ jobs:
       docker-password: ${{ secrets.DOCKER_HUB_TOKEN }}
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # 6. Deploy to Test  — DISABLED
+  # 4b. Deploy to Test (auto) — before QA
   # ─────────────────────────────────────────────────────────────────────────────
-  # deploy-test:
-  #   name: Deploy → Test (auto)
-  #   needs: [generate-qa-version, docker-build-push]
-  #   runs-on: ubuntu-latest
-  #   environment: test
-  #   steps:
-  #     - name: Deploy to Test
-  #       run: |
-  #         VERSION="${{ needs.generate-qa-version.outputs.version }}"
-  #         IMAGE="${{ vars.DOCKER_HUB_REPOSITORY }}:${VERSION}"
-  #         echo "::notice title=Deploying to Test::${IMAGE}"
-  #         # ── Replace with your actual deployment commands ──
-  #         echo "Deployed ${IMAGE} to Test ✓"
+  deploy-test:
+    name: Deploy → Test (auto)
+    needs: [generate-test-version, docker-build-push-test]
+    runs-on: ubuntu-latest
+    environment: test
+    steps:
+      - name: Deploy to Test environment
+        run: |
+          VERSION="${{ needs.generate-test-version.outputs.version }}"
+          IMAGE="${{ vars.DOCKER_HUB_REPOSITORY }}:${VERSION}"
+          echo "::notice title=Deploying to Test::${IMAGE}"
+          # ── Replace with your actual deployment commands ──
+          echo "Deployed ${IMAGE} to Test ✓"
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # 7. Deploy to QA  ← APPROVAL GATE
-  #    Add required reviewers: repo → Settings → Environments → qa
+  # 4c. Git tag (dev-v) — only after Test deploy succeeds (same idea as dev pipeline)
+  # ─────────────────────────────────────────────────────────────────────────────
+  tag-test:
+    name: Tag Test Build (dev-v)
+    needs: [generate-test-version, deploy-test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create and push Test git tag (dev-v)
+        run: |
+          VERSION="${{ needs.generate-test-version.outputs.version }}"
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "${VERSION}" -m "Test ${VERSION}"
+          git push origin "${VERSION}"
+          echo "::notice title=Test Git Tag::${VERSION}"
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 5. Generate QA-scoped version — after Test git tag; counts rc-v* tags only
+  # ─────────────────────────────────────────────────────────────────────────────
+  generate-qa-version:
+    name: Generate QA Version (rc-v)
+    needs: [npm-test, npm-coverage, tag-test]
+    uses: ./.github/workflows/tmpl-versioning.yml
+    with:
+      tag-prefix: 'rc-v'
+      include-ci-suffix: false
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 6. Deploy to QA  ← APPROVAL GATE
+  #     Re-tags the Docker image from Test (dev-v) to QA (rc-v), then deploy — same pattern as Live.
+  #     Add required reviewers: repo → Settings → Environments → qa
   # ─────────────────────────────────────────────────────────────────────────────
   deploy-qa:
     name: Deploy → QA [approval required]
-    needs: [generate-qa-version, docker-build-push]
+    needs: [generate-test-version, generate-qa-version, tag-test]
     runs-on: ubuntu-latest
     environment: qa
     steps:
+      - name: Re-tag Docker image with QA version
+        run: |
+          TEST_VERSION="${{ needs.generate-test-version.outputs.version }}"
+          QA_VERSION="${{ needs.generate-qa-version.outputs.version }}"
+          echo "${{ secrets.DOCKER_HUB_TOKEN }}" | \
+            docker login -u "${{ secrets.DOCKER_HUB_USERNAME }}" --password-stdin
+          docker pull ${{ vars.DOCKER_HUB_REPOSITORY }}:${TEST_VERSION}
+          docker tag \
+            ${{ vars.DOCKER_HUB_REPOSITORY }}:${TEST_VERSION} \
+            ${{ vars.DOCKER_HUB_REPOSITORY }}:${QA_VERSION}
+          docker push ${{ vars.DOCKER_HUB_REPOSITORY }}:${QA_VERSION}
+          echo "::notice title=Docker QA Tag::${QA_VERSION}"
+
       - name: Deploy to QA
         run: |
           VERSION="${{ needs.generate-qa-version.outputs.version }}"
@@ -128,7 +177,7 @@ jobs:
           echo "Deployed ${IMAGE} to QA ✓"
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # 8. Tag QA — only runs after deploy-qa succeeds
+  # 7. Tag QA — only runs after deploy-qa succeeds
   # ─────────────────────────────────────────────────────────────────────────────
   tag-qa:
     name: Tag QA Build (rc-v)
@@ -152,7 +201,7 @@ jobs:
           echo "::notice title=QA Git Tag::${VERSION}"
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # 9. Generate Live-scoped version — only runs after QA tag is pushed
+  # 8. Generate Live-scoped version — only runs after QA tag is pushed
   #    Counts existing v{YYYY.MM}.* tags — isolated from QA (rc-v*) tags
   # ─────────────────────────────────────────────────────────────────────────────
   generate-live-version:
@@ -164,7 +213,7 @@ jobs:
       include-ci-suffix: false
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # 10. Deploy to Live  ← APPROVAL GATE
+  # 9. Deploy to Live  ← APPROVAL GATE
   #     Re-tags the Docker image from rc-v to the clean Live version.
   #     Add required reviewers: repo → Settings → Environments → live
   # ─────────────────────────────────────────────────────────────────────────────
@@ -196,7 +245,7 @@ jobs:
           echo "Deployed ${IMAGE} to Live ✓"
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # 11. Tag Live — only runs after deploy-live succeeds
+  # 10. Tag Live — only runs after deploy-live succeeds
   # ─────────────────────────────────────────────────────────────────────────────
   tag-live:
     name: Tag Live Release (v)
