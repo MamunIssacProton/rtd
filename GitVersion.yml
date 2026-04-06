@@ -30,15 +30,18 @@ branches:
     increment: Patch
     prevent-increment-of-merged-branch-version: false
     is-release-branch: false
+    source-branches: ['main', 'release']
 
   main:
     regex: ^(main|master)$
     tag: ''
     increment: Patch
     is-release-branch: true
+    source-branches: []
 
   release:
     regex: ^release/.*$
     tag: ''
     increment: Patch
     is-release-branch: true
+    source-branches: ['main']
