@@ -33,6 +33,24 @@ env:
 # ═══════════════════════════════════════════════════════════════════════════════
 jobs:
   # ───────────────────────────────────────────────────────────────────────────────
+  # 0. Config — exposes env vars as job outputs so reusable workflow with: blocks
+  #    can reference them (env.* is not allowed in with: for workflow_call jobs).
+  #    To change Node version or release cycle: edit the env: block above.
+  # ───────────────────────────────────────────────────────────────────────────────
+  config:
+    name: Pipeline Configuration
+    runs-on: ubuntu-latest
+    outputs:
+      node-version: ${{ steps.cfg.outputs.node-version }}
+      version-major-minor: ${{ steps.cfg.outputs.version-major-minor }}
+    steps:
+      - name: Expose configuration
+        id: cfg
+        run: |
+          echo "node-version=${{ env.NODE_VERSION }}"           >> "$GITHUB_OUTPUT"
+          echo "version-major-minor=${{ env.VERSION_MAJOR_MINOR }}" >> "$GITHUB_OUTPUT"
+
+  # ───────────────────────────────────────────────────────────────────────────────
   # 1. Generate the CI build number
   #    Format: {MajorMinor}.0-ci.{YYYYMMDD}.{RR}
   # ───────────────────────────────────────────────────────────────────────────────
@@ -56,10 +74,10 @@ jobs:
   # ───────────────────────────────────────────────────────────────────────────────
   npm-build:
     name: NPM Build
-    needs: generate-build-number
+    needs: [config, generate-build-number]
     uses: ./.github/workflows/templates/npm-build.yml
     with:
-      node-version: ${{ env.NODE_VERSION }}
+      node-version: ${{ needs.config.outputs.node-version }}
       working-directory: .
 
   # ───────────────────────────────────────────────────────────────────────────────
@@ -68,18 +86,18 @@ jobs:
   # ───────────────────────────────────────────────────────────────────────────────
   npm-test:
     name: NPM Test
-    needs: npm-build
+    needs: [config, npm-build]
     uses: ./.github/workflows/templates/npm-test.yml
     with:
-      node-version: ${{ env.NODE_VERSION }}
+      node-version: ${{ needs.config.outputs.node-version }}
       working-directory: .
 
   npm-coverage:
     name: NPM Coverage
-    needs: npm-build
+    needs: [config, npm-build]
     uses: ./.github/workflows/templates/npm-coverage.yml
     with:
-      node-version: ${{ env.NODE_VERSION }}
+      node-version: ${{ needs.config.outputs.node-version }}
       working-directory: .
       coverage-artifact-name: coverage-dev-${{ github.run_number }}
 
@@ -88,10 +106,10 @@ jobs:
   # ───────────────────────────────────────────────────────────────────────────────
   docker-build-push:
     name: Docker Build & Push
-    needs: [generate-build-number, npm-test, npm-coverage]
+    needs: [config, generate-build-number, npm-test, npm-coverage]
     uses: ./.github/workflows/templates/docker-build-push.yml
     with:
-      node-version: ${{ env.NODE_VERSION }}
+      node-version: ${{ needs.config.outputs.node-version }}
       docker-tag: ${{ needs.generate-build-number.outputs.build-number }}
       docker-repository: ${{ vars.DOCKER_HUB_REPOSITORY }}
       dockerfile-path: Dockerfile
