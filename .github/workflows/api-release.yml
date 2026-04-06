@@ -170,6 +170,20 @@ jobs:
     permissions:
       contents: write
     steps:
+     - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create and push Live git tag (v)
+        run: |
+          LIVE_VERSION="${{ needs.generate-live-version.outputs.version }}"
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "${LIVE_VERSION}" -m "Live ${LIVE_VERSION}"
+          git push origin "${LIVE_VERSION}"
+          echo "::notice title=Live Git Tag::${LIVE_VERSION}"
+          
       - name: Re-tag Docker image with Live version
         run: |
           QA_VERSION="${{ needs.generate-qa-version.outputs.version }}"
@@ -190,17 +204,3 @@ jobs:
           echo "::notice title=Deploying to Live::${IMAGE}"
           # ── Replace with your actual deployment commands ──
           echo "Deployed ${IMAGE} to Live ✓"
-
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Create and push Live git tag (v)
-        run: |
-          LIVE_VERSION="${{ needs.generate-live-version.outputs.version }}"
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag "${LIVE_VERSION}" -m "Live ${LIVE_VERSION}"
-          git push origin "${LIVE_VERSION}"
-          echo "::notice title=Live Git Tag::${LIVE_VERSION}"
