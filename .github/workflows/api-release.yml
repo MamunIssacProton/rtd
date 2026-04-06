@@ -42,9 +42,12 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   generate-test-version:
     name: Generate Test Version (dev-v)
+  generate-test-version:
+    name: Generate Test Version (dev-v)
     needs: [npm-test, npm-coverage]
     uses: ./.github/workflows/tmpl-versioning.yml
     with:
+      tag-prefix: 'dev-v'
       tag-prefix: 'dev-v'
       include-ci-suffix: false
 
@@ -54,9 +57,13 @@ jobs:
   docker-build-push-test:
     name: Docker Build & Push (Test / dev-v)
     needs: generate-test-version
+  docker-build-push-test:
+    name: Docker Build & Push (Test / dev-v)
+    needs: generate-test-version
     uses: ./.github/workflows/tmpl-docker-build-push.yml
     with:
       node-version: '22'
+      docker-tag: ${{ needs.generate-test-version.outputs.version }}
       docker-tag: ${{ needs.generate-test-version.outputs.version }}
       docker-repository: ${{ vars.DOCKER_HUB_REPOSITORY }}
       dockerfile-path: Dockerfile
@@ -114,12 +121,20 @@ jobs:
     with:
       tag-prefix: 'rc-v'
       include-ci-suffix: false
+  generate-qa-version:
+    name: Generate QA Version (rc-v)
+    needs: [npm-test, npm-coverage, tag-test]
+    uses: ./.github/workflows/tmpl-versioning.yml
+    with:
+      tag-prefix: 'rc-v'
+      include-ci-suffix: false
 
   # ─────────────────────────────────────────────────────────────────────────────
   # 8. Deploy QA (Approval Required)
   # ─────────────────────────────────────────────────────────────────────────────
   deploy-qa:
     name: Deploy → QA [approval required]
+    needs: [generate-test-version, generate-qa-version, tag-test]
     needs: [generate-test-version, generate-qa-version, tag-test]
     runs-on: ubuntu-latest
     environment: qa
@@ -171,6 +186,7 @@ jobs:
   generate-live-version:
     name: Generate Live Version (v)
     needs: tag-qa
+    needs: tag-qa
     uses: ./.github/workflows/tmpl-versioning.yml
     with:
       tag-prefix: 'v'
@@ -181,6 +197,7 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   deploy-live:
     name: Deploy → Live [approval required]
+    needs: [generate-qa-version, generate-live-version]
     needs: [generate-qa-version, generate-live-version]
     runs-on: ubuntu-latest
     environment: live
