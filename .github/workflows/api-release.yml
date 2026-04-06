@@ -33,7 +33,6 @@ jobs:
     uses: ./.github/workflows/tmpl-versioning.yml
     with:
       tag-prefix: 'dev-v'
-      tag-prefix: 'dev-v'
       include-ci-suffix: false
 
   docker-build-push-test:
@@ -41,7 +40,6 @@ jobs:
     uses: ./.github/workflows/tmpl-docker-build-push.yml
     with:
       node-version: '22'
-      docker-tag: ${{ needs.generate-test-version.outputs.version }}
       docker-tag: ${{ needs.generate-test-version.outputs.version }}
       docker-repository: ${{ vars.DOCKER_HUB_REPOSITORY }}
       dockerfile-path: Dockerfile
@@ -71,7 +69,6 @@ jobs:
           fetch-depth: 0
       - run: |
           VERSION="${{ needs.generate-test-version.outputs.version }}"
-          git config user.name "github-actions[bot]"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git tag "${VERSION}" -m "Test ${VERSION}"
@@ -105,7 +102,6 @@ jobs:
           fetch-depth: 0
       - run: |
           VERSION="${{ needs.generate-qa-version.outputs.version }}"
-          git config user.name "github-actions[bot]"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git tag "${VERSION}" -m "QA ${VERSION}"
@@ -141,7 +137,5 @@ jobs:
           VERSION="${{ needs.generate-live-version.outputs.version }}"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag "${VERSION}" -m "Live ${VERSION}"
-          git push origin "${VERSION}"
           git tag "${VERSION}" -m "Live ${VERSION}"
           git push origin "${VERSION}"
