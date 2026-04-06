@@ -1,7 +1,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Reusable Template — GitVersion-based Branch-Scoped Versioning
 #
-# Uses GitVersion (gittools/actions v3, GitVersion 6.x) to compute the
+# Uses GitVersion (gittools/actions v1.1.1, GitVersion 5.x) to compute the
 # semantic patch counter from git history, then formats the version string
 # according to the project convention:
 #
@@ -12,9 +12,6 @@
 #   output : v2026.04.1
 #
 # Requires GitVersion.yml at the repository root.
-#
-# The tag-prefix is passed as a GitVersion /overrideconfig at runtime so that
-# dev tags (dev-v*) and release tags (v*) maintain isolated counters.
 #
 # Inputs:
 #   tag-prefix        — git tag prefix  e.g. "dev-v"  or  "v"
@@ -61,24 +58,21 @@ jobs:
           fetch-depth: 0
 
       - name: Install GitVersion
-        uses: gittools/actions/gitversion/setup@v3
+        uses: gittools/actions/gitversion/setup@v1.1.1
         with:
           versionSpec: '5.x'
 
-      # Override tag-prefix at runtime so dev (dev-v*) and release (v*) tags
-      # are counted independently — they never share the same Patch counter.
       - name: Execute GitVersion
         id: gitversion
-        uses: gittools/actions/gitversion/execute@v3
+        uses: gittools/actions/gitversion/execute@v1.1.1
         with:
-          overrideConfig: |
-            tag-prefix: ${{ inputs.tag-prefix }}
+          useConfigFile: true
 
       - name: Compose version string
         id: ver
         run: |
           YEAR_MONTH=$(date -u +'%Y.%m')
-          PATCH="${{ steps.gitversion.outputs.patch }}"
+          PATCH="${{ steps.gitversion.outputs.Patch }}"
           PREFIX="${{ inputs.tag-prefix }}"
 
           if [ "${{ inputs.include-ci-suffix }}" = "true" ]; then
